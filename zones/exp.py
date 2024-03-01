@@ -74,7 +74,7 @@ def exp(config):
 
     model = PPO.load(config.rl_model_path, device=device)
     gcvf = GCVNetwork(input_dim=124)
-    gcvf.load_state_dict(torch.load(config.gcvf_path))
+    gcvf.load_state_dict(torch.load(config.gcvf_path, map_location=device))
     gcvf = gcvf.to(device)
     
     num_success, num_dangerous = 0, 0
