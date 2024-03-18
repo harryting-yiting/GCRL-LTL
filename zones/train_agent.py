@@ -14,7 +14,7 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 from rl.traj_buffer import TrajectoryBuffer
 from rl.callbacks import CollectTrajectoryCallback
-from envs import ZonesEnv, ZoneRandomGoalTrajEnv
+from envs import ZonesEnv, ZoneRandomGoalTrajEnv, ZoneRandomGoalEnv
 from envs.utils import get_zone_vector
 
 
@@ -59,7 +59,7 @@ def main(args):
 
     env_fn = lambda: ZoneRandomGoalTrajEnv(
         env=gym.make('Zones-8-v0', timeout=timeout), 
-        primitives_path='models/primitives', 
+        primitives_path='/app/vfstl/src/GCRL-LTL/zones/models/primitives', 
         zones_representation=get_zone_vector(),
         use_primitves=True,
         rewards=[0, 1],
@@ -67,35 +67,41 @@ def main(args):
     )
 
     env = make_vec_env(env_fn, n_envs=num_cpus, seed=seed, vec_env_cls=SubprocVecEnv)
-    model = PPO(
-        policy='MultiInputPolicy',
-        policy_kwargs=dict(
-            activation_fn=nn.ReLU, 
-            net_arch=[512, 1024, 256], 
-            features_extractor_class=CustomCombinedExtractor,
-        ),
-        env=env,
-        verbose=1,
-        learning_rate=0.0003,
-        gamma=0.998,
-        n_epochs=10,
-        n_steps=int(50000/num_cpus),
-        batch_size=1000,
-        ent_coef=0.003,
-        device=device,
-    )
+    model = None
+    if not args.old_model_path:
+        model = PPO(
+            policy='MultiInputPolicy',
+            policy_kwargs=dict(
+                activation_fn=nn.ReLU, 
+                net_arch=[512, 1024, 256], 
+                features_extractor_class=CustomCombinedExtractor,
+            ),
+            env=env,
+            verbose=1,
+            learning_rate=0.0003,
+            gamma=0.998,
+            n_epochs=10,
+            n_steps=int(50000/num_cpus),
+            batch_size=833,#1024
+            ent_coef=0.003,
+            device=device,
+        )
+    else:
+        model = PPO.load(args.old_model_path)
+        model.set_env(env)
+        total_timesteps = args.additional_steps
 
-    log_path = 'logs/ppo/{}/'.format(exp_name)
+    log_path = '/app/vfstl/src/GCRL-LTL/zones/logs/ppo/{}/'.format(exp_name)
     new_logger = configure(log_path, ['stdout', 'csv'])
     model.set_logger(new_logger)
 
-    eval_log_path = 'logs/ppo/{}/'.format(exp_name)
+    eval_log_path = '/app/vfstl/src/GCRL-LTL/zones/logs/ppo/{}/'.format(exp_name)
     eval_env_fn = lambda: ZoneRandomGoalTrajEnv(
         env=gym.make('Zones-8-v0', timeout=timeout),
-        primitives_path='models/primitives',
+        primitives_path='/app/vfstl/src/GCRL-LTL/zones/models/primitives',
         zones_representation=get_zone_vector(),
         use_primitves=True,
-        rewards=[-0.001, 1],
+        rewards=[-0.006, 1],# -0.001
         device=device,
     )
     eval_env = make_vec_env(eval_env_fn)
@@ -103,33 +109,45 @@ def main(args):
         eval_env=eval_env,
         best_model_save_path=eval_log_path,
         log_path=eval_log_path,
-        eval_freq=100000/num_cpus,
-        n_eval_episodes=10,
+        eval_freq=140000/num_cpus,
+        n_eval_episodes=15,
         deterministic=True,
     )
     
     traj_buffer = TrajectoryBuffer(traj_length=1000, buffer_size=total_timesteps, obs_dim=100, n_envs=num_cpus, device=device)
     traj_callback = CollectTrajectoryCallback(traj_buffer=traj_buffer)
 
-    callback = CallbackList([eval_callback, traj_callback])
-    
+    # callback = CallbackList([eval_callback, traj_callback])
+    callback = CallbackList([eval_callback])
     model.learn(total_timesteps=total_timesteps, callback=callback)
 
-    traj_dataset = traj_buffer.build_dataset(model.policy)
-    torch.save(traj_dataset, './datasets/{}_traj_dataset.pt'.format(exp_name))
+    #traj_dataset = traj_buffer.build_dataset(model.policy)
+    #torch.save(traj_dataset, './datasets/{}_traj_dataset.pt'.format(exp_name))
 
 
 if __name__ == '__main__':
 
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument('--device', type=str, default='cuda')
+    # parser.add_argument('--timeout', type=int, default=1000)
+    # parser.add_argument('--total_timesteps', type=int, default=1e7)
+    # parser.add_argument('--num_cpus', type=int, default=4)
+    # parser.add_argument('--seed', type=int, default=123)
+    # parser.add_argument('--exp_name', type=str, default='traj_exp')
+    # parser.add_argument('--execution_mode', type=str, default='primitives', choices=('primitives'))
+    
     parser = argparse.ArgumentParser()
-    parser.add_argument('--device', type=str, default='cpu')
-    parser.add_argument('--timeout', type=int, default=1000)
-    parser.add_argument('--total_timesteps', type=int, default=1e7)
-    parser.add_argument('--num_cpus', type=int, default=4)
+    parser.add_argument('--device', type=str, default='cuda')
+    parser.add_argument('--timeout', type=int, default=500)
+    parser.add_argument('--total_timesteps', type=int, default=5*1e7)
+    parser.add_argument('--num_cpus', type=int, default=70)
     parser.add_argument('--seed', type=int, default=123)
     parser.add_argument('--exp_name', type=str, default='traj_exp')
     parser.add_argument('--execution_mode', type=str, default='primitives', choices=('primitives'))
     
+    # conitnue traning
+    parser.add_argument('--old_model_path', type=str, default="/app/vfstl/src/GCRL-LTL/zones/logs/ppo/traj_exp/best_model_318_1721.zip")
+    parser.add_argument('--additional_steps', type=int, default=1e7)
     args = parser.parse_args()
 
     seed = args.seed

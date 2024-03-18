@@ -174,6 +174,15 @@ class LTLZonesEnv(ZonesEnv):
                 events += str(self.zones[h_inedx])
 
         return events
+    
+    def get_distance_to_zones(self):
+        distance = []
+        for h_inedx, h_pos in enumerate(self.zones_pos):
+            h_dist = self.dist_xy(h_pos)
+            distance.append(h_dist)
+        
+        return distance
+        
 
 class ZonesEnv1(LTLZonesEnv):
     def __init__(self):
